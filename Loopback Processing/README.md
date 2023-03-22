@@ -27,10 +27,36 @@ Computer Configuration/Administrative Templates/System/Group Policy
 Use the policy setting ```Configure user Group Policy loopback processing mode``` to configure loopback 
 
 
-### Breaking it down
+
+# Resultant Configuration 
+### Normal Mode 
+![Normal Mode](/Loopback%20Processing/images/GPO_Process_User_Normal.png?raw=true "Normal Processing")
+
+
+### Loopback Merge
+![Merge Mode](/Loopback%20Processing/images/GPO_Process_User_LoopbackMerge.png?raw=true "Loopback Merge Processing")
+
+During loopback processing in merge mode, user GPOs process first (exactly as they do during normal policy processing).  
+Following normal user policy processing the Group Policy engine applies user settings from GPOs linked to the computer's OU.  
+The user receives all user settings from GPOs applied to the user and all user settings from GPOs applied to the computer.  
+The user settings from the computer’s GPOs win any conflicts since they apply last.
+
+### Loopback Replace
+![Replace Mode](/Loopback%20Processing/images/GPO_Process_User_LoopbackReplace.png?raw=true "Loopback Replace Processing")
+
+During loopback processing in replace mode, the user settings applied to the computer “replace” those applied to the user.  
+The Group Policy service skips the GPOs linked to the user’s OU.  
+Group Policy effectively processes as if user object was in the OU of the computer rather than its current OU.
+
+
+
+# Summary
  1. It is a computer configuration setting. 
  2. When enabled, user settings from GPOs applied to the computer apply to the logged on user.
  3. Changes the list of applicable GPOs and the order in which they apply to a user.
+ 4. Merge mode applies GPOs linked to the user object first, followed by GPOs with user settings linked to the computer object.
+ 5. Replace mode completely skips GPOs linked to the user object and only applies user settings in GPOs linked to the computer object. 
+ 6. **Use replace mode when you need to disregard all GPOs that are linked in the path of the user object.**
 
 
 

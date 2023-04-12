@@ -14,4 +14,7 @@ Helps resolve applying the Group Policy loopback function
 
 [[This]Loopback processing details](Loopback-Processing.md)
 
+[[This]Loopback processing explained](Loopback-Processing-explained.md)
+Source : [The IT stuff](http://kudratsapaev.blogspot.com/2009/07/loopback-processing-of-group-policy.html)
+
 [MS Website Loopback processing](https://learn.microsoft.com/en-us/troubleshoot/windows-server/group-policy/loopback-processing-of-group-policy)

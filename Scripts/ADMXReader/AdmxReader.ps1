@@ -54,9 +54,13 @@ function Get-ScriptDirectory
 
 [string]$ADMXFolder = "C:\temp\Admx"
 [string]$OutputFile = [System.IO.Path]::Combine($ScriptDirectory, $SourceAdmx, ".csv")
-[hashtable]$Languages = @{
+$Languages = @{
 	base	 = "en-US"
-	addition = "fr-FR, de-DE"
+	extended = @("fr-FR", "de-DE")
+}
+
+$paramGetContent = @{
+	Encoding = 'UTF8'
 }
 #endregion 
 
@@ -71,7 +75,7 @@ If (!(Test-Path -Path $ADMXFolder))
 # Checking for the Windows supportedOn vendor definition files
 If (Test-Path("$ADMXFolder\en-US\Windows.adml"))
 {
-	[xml]$supportedOnWindowsTableFile = Get-Content "$ADMXFolder\en-US\Windows.adml"
+	[xml]$supportedOnWindowsTableFile = Get-Content "$ADMXFolder\en-US\Windows.adml" @paramGetContent
 }
 
 
@@ -88,13 +92,60 @@ ForEach ($file In $AdmxFiles)
 	#Test base Language Files
 	If (Test-Path("$ADMXFolder\$($Languages.base)\$($file.BaseName).adml"))
 	{
-		$Admxlist.Add($file.Basename,$file.FullName)
+		$LocaleIDlist = [system.Collections.Generic.List`1[string]]::new()
+		$LocaleIDlist.Add($Languages.base)
+		$Admxlist.Add($file.Basename, @{
+				AdmxName = $file.Basename
+				AdmxFullname = $file.FullName
+				LocalID  = $LocaleIDlist
+			})
+		
+		
+		foreach ($lcid in $Languages.extended) {
+			If (Test-Path("$ADMXFolder\$lcid\$($file.BaseName).adml"))
+			{
+				$Admxlist.$($file.Basename).LocalID.Add($lcid)
+			}
+		}
 	}
 	
 }
 Write-Output ($Admxlist.Count.ToString() + " ADMX files to process in """ + $ADMXFolder + """")
+#	
+#$Admxlist
+#$Admxlist.OneDrive
+#$Admxlist.OneDrive.localID
 
+ForEach ($key In $Admxlist.keys)
+{
+	$AdmxName = $Admxlist.$key.AdmxName
+	$AdmxFile = $Admxlist.$key.AdmxFullname
+	
+	#Proces each file in the directory
+	Write-Output ("*** Processing ADMX " + $AdmxName)
+	
 
+	
+	[xml]$AdmxData = Get-Content "$AdmxFile" @paramGetContent
+
+	
+	# Retrieve all information from the specific ADMX file
+	$supportedOnDefChilds = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes	
+	$categoryChilds = $data.policyDefinitions.categories.ChildNodes
+	
+	ForEach ($lcid In $Admxlist.$key.LocalID)
+	{
+		$AdmxlangPath = ([system.io.path]::Combine($ADMXFolder, $lcid, $AdmxName + ".adml"))
+		[xml]$Admxlang = Get-Content -path $AdmxlangPath @paramGetContent
+		
+		# Retrieve all information from the specific ADML file
+		$stringTableChilds = $Admxlang.policyDefinitionResources.resources.stringTable.ChildNodes
+		$presentationTableChilds = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
+	}
+	
+	
+	
+}
 
 
 #endregion 

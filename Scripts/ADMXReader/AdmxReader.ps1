@@ -24,6 +24,7 @@
 ######################
 #region Function Declaration 
 ######################
+Import-Module AdmxTracker
 function Get-ScriptDirectory
 {
 	[OutputType([string])]
@@ -44,6 +45,44 @@ function Get-ScriptDirectory
 
 #region Classes
 
+Class PolicyDefinitions   {
+	
+	# Properties
+	[string]$AdmxName
+	[string]$LCID
+	[System.Xml.XmlNodeList]$SupportedOnDefChilds
+	[System.Xml.XmlNodeList]$CategoryChilds
+	[System.Xml.XmlNodeList]$PoliciesChilds
+	[System.Xml.XmlNodeList]$StringTableChilds
+	[System.Xml.XmlNodeList]$PresentationTableChilds
+	
+	<#
+		$supportedOnDefChilds = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes	
+		$categoryChilds = $AdmxData.policyDefinitions.categories.ChildNodes
+		$policiesChilds = $AdmxData.PolicyDefinitions.policies.ChildNodes
+
+		$stringTableChilds = $Admxlang.policyDefinitionResources.resources.stringTable.ChildNodes
+		$presentationTableChilds = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
+	
+	XmlDocument
+	#>
+
+# Constructors
+PolicyDefinitions ([string]$AdmxName, [string]$LCID,[System.Xml.XmlDocument]$AdmxData, [System.Xml.XmlDocument]$Admxlang) {
+		$this.AdmxName = $AdmxName
+		$this.LCID = $LCID
+		$this.SupportedOnDefChilds = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes
+		$this.CategoryChilds = $AdmxData.policyDefinitions.categories.ChildNodes
+		$this.PoliciesChilds = $AdmxData.PolicyDefinitions.policies.ChildNodes
+		$this.StringTableChilds = $Admxlang.policyDefinitionResources.resources.stringTable.ChildNodes
+		$this.PresentationTableChilds = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
+		
+}
+
+#Methods
+
+}
+
 
 #endregion
 
@@ -62,6 +101,12 @@ $Languages = @{
 $paramGetContent = @{
 	Encoding = 'UTF8'
 }
+
+#Create Lists used script GLOBAL
+#$ListSupportedOn = [System.Collections.Generic.List`1[Object]]::new()
+$ListPoliciesDefinitions = [System.Collections.Generic.List`1[Object]]::new()
+$VendorSupportedOn = [System.Collections.Hashtable]::new()
+
 #endregion 
 
 
@@ -72,20 +117,18 @@ If (!(Test-Path -Path $ADMXFolder))
 	Throw "Policy Directory $ADMXFolder NOT Found. Script Execution STOPPED."
 }
 
-# Checking for the Windows supportedOn vendor definition files
-If (Test-Path("$ADMXFolder\en-US\Windows.adml"))
-{
-	[xml]$supportedOnWindowsTableFile = Get-Content "$ADMXFolder\en-US\Windows.adml" @paramGetContent
-}
-
-
+#region ADMXfilelist
 # Creating the ADMX file list and language to process
 # If the corresponding AMDL file does not exist in en-US the ADMX will not be processed.
 # Only the en-US ADML file is mandatory.
 # Retrieving all the ADMX files
+$Admxlist = [System.Collections.Hashtable]::new()
 $AdmxFiles = Get-ChildItem $ADMXFolder -filter *.admx
 
-$Admxlist = [System.Collections.Hashtable]::new()
+If ($AdmxFiles -eq $null)
+{
+	Throw "No Admx Policy file found. Script Execution STOPPED."
+}
 
 ForEach ($file In $AdmxFiles)
 {
@@ -95,13 +138,14 @@ ForEach ($file In $AdmxFiles)
 		$LocaleIDlist = [system.Collections.Generic.List`1[string]]::new()
 		$LocaleIDlist.Add($Languages.base)
 		$Admxlist.Add($file.Basename, @{
-				AdmxName = $file.Basename
+				AdmxName	 = $file.Basename
 				AdmxFullname = $file.FullName
-				LocalID  = $LocaleIDlist
+				LocalID	     = $LocaleIDlist
 			})
 		
 		
-		foreach ($lcid in $Languages.extended) {
+		ForEach ($lcid In $Languages.extended)
+		{
 			If (Test-Path("$ADMXFolder\$lcid\$($file.BaseName).adml"))
 			{
 				$Admxlist.$($file.Basename).LocalID.Add($lcid)
@@ -111,10 +155,24 @@ ForEach ($file In $AdmxFiles)
 	
 }
 Write-Output ($Admxlist.Count.ToString() + " ADMX files to process in """ + $ADMXFolder + """")
-#	
-#$Admxlist
-#$Admxlist.OneDrive
-#$Admxlist.OneDrive.localID
+#endregion ADMXfilelist
+
+#region SupportedOn
+# Checking for Vendor supportedOn Files
+# Checking for the Windows supportedOn vendor definition files
+If (Test-Path("$ADMXFolder\en-US\Windows.adml"))
+{
+	[xml]$supportedOnWindowsTableFile = Get-Content "$ADMXFolder\en-US\Windows.adml" @paramGetContent
+	# Updating the SupportedOn list with the  Windows supportedOn information from the Windows.ADMX file
+	If ($supportedOnWindowsTableFile -ne $null)
+	{
+		$VendorSupportedOn.Add('Windows',@{})
+		$supportedOnWindowsTableFile.policyDefinitionResources.resources.stringTable.ChildNodes | ForEach-Object{ $VendorSupportedOn.Windows[$_.id] = $_.'#text' }
+	}
+}
+
+#endregion SupportedOn
+
 
 ForEach ($key In $Admxlist.keys)
 {
@@ -122,16 +180,17 @@ ForEach ($key In $Admxlist.keys)
 	$AdmxFile = $Admxlist.$key.AdmxFullname
 	
 	#Proces each file in the directory
-	Write-Output ("*** Processing ADMX " + $AdmxName)
-	
-
+	Write-Output ("**** Pre Processing ADMX " + $AdmxName)
 	
 	[xml]$AdmxData = Get-Content "$AdmxFile" @paramGetContent
 
 	
 	# Retrieve all information from the specific ADMX file
-	$supportedOnDefChilds = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes	
-	$categoryChilds = $data.policyDefinitions.categories.ChildNodes
+#	$supportedOnDefChilds = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes
+#	
+#	$policiesChilds = $AdmxData.PolicyDefinitions.policies.ChildNodes
+#	
+#	$categoryChilds = $AdmxData.policyDefinitions.categories.ChildNodes
 	
 	ForEach ($lcid In $Admxlist.$key.LocalID)
 	{
@@ -139,8 +198,12 @@ ForEach ($key In $Admxlist.keys)
 		[xml]$Admxlang = Get-Content -path $AdmxlangPath @paramGetContent
 		
 		# Retrieve all information from the specific ADML file
-		$stringTableChilds = $Admxlang.policyDefinitionResources.resources.stringTable.ChildNodes
-		$presentationTableChilds = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
+#		$stringTableChilds = $Admxlang.policyDefinitionResources.resources.stringTable.ChildNodes
+		#		$presentationTableChilds = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
+		
+		$ListPoliciesDefinitions.Add([PolicyDefinitions]::new($AdmxName, $lcid, $AdmxData, $Admxlang))
+		
+
 	}
 	
 	

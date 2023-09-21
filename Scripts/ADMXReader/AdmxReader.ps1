@@ -44,6 +44,55 @@ function Get-ScriptDirectory
 
 
 #region Classes
+Class Policy{
+	
+	# Properties
+	[string]$Name
+	[string]$Class
+	[string]$Admx
+	[string]$Parent
+	[string]$displayName
+	[string]$ExplainText
+	[string]$supportedOnVendor
+	[string]$SupportedOn
+	[string]$Type
+	[string]$Label
+	[string]$RegistryHive
+	[string]$RegistryKey
+	[string]$RegistryValueName
+	[String]$RegistryValue
+	
+	
+	# Constructors
+	Policy()
+	{
+		
+	}
+	
+	
+	Policy([string]$Admx, [string]$Name, [string]$Class, [string]$RegistryKey )
+	{
+		$this.Name = $Name
+		$this.Class = $Class
+		$this.Admx = $Admx
+		$this.RegistryKey = $RegistryKey
+		$this.RegistryHive = $this.GetHive($Class)
+		
+	}
+	
+	# methods
+	[string] GetHive([string]$PolicyClass)
+	{
+		$RegHive = ""
+		If ($PolicyClass -eq "User") { $RegHive = "HKEY_CURRENT_USER" }
+		If ($PolicyClass -eq "Machine") { $RegHive = "HKEY_LOCAL_MACHINE" }
+		If ($PolicyClass -eq "Both") { $RegHive = "HKEY_LOCAL_MACHINE" }
+		
+		return $RegHive
+	}
+	
+}
+
 
 Class PolicyDefinitions   {
 	
@@ -52,35 +101,44 @@ Class PolicyDefinitions   {
 	[string]$LCID
 	[System.Xml.XmlNodeList]$SupportedOnDefChilds
 	[System.Xml.XmlNodeList]$CategoryChilds
-	[System.Xml.XmlNodeList]$PoliciesChilds
+	[System.Xml.XmlNodeList]$PolicyDefinitions
 	[System.Xml.XmlNodeList]$StringTableChilds
 	[System.Xml.XmlNodeList]$PresentationTableChilds
+	[System.Collections.Generic.List`1[Object]]$Policies = [System.Collections.Generic.List`1[Object]]::new()
 	
-	<#
-		$supportedOnDefChilds = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes	
-		$categoryChilds = $AdmxData.policyDefinitions.categories.ChildNodes
-		$policiesChilds = $AdmxData.PolicyDefinitions.policies.ChildNodes
-
-		$stringTableChilds = $Admxlang.policyDefinitionResources.resources.stringTable.ChildNodes
-		$presentationTableChilds = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
 	
-	XmlDocument
-	#>
-
-# Constructors
-PolicyDefinitions ([string]$AdmxName, [string]$LCID,[System.Xml.XmlDocument]$AdmxData, [System.Xml.XmlDocument]$Admxlang) {
+	# Constructors
+	PolicyDefinitions ([string]$AdmxName, [string]$LCID, [System.Xml.XmlDocument]$AdmxData, [System.Xml.XmlDocument]$Admxlang)
+	{
 		$this.AdmxName = $AdmxName
 		$this.LCID = $LCID
 		$this.SupportedOnDefChilds = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes
 		$this.CategoryChilds = $AdmxData.policyDefinitions.categories.ChildNodes
-		$this.PoliciesChilds = $AdmxData.PolicyDefinitions.policies.ChildNodes
+		$this.PolicyDefinitions = $AdmxData.PolicyDefinitions.policies.ChildNodes
 		$this.StringTableChilds = $Admxlang.policyDefinitionResources.resources.stringTable.ChildNodes
 		$this.PresentationTableChilds = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
 		
-}
-
-#Methods
-
+	}
+	
+	#Methods
+	[void]ParsePolicies()
+	{
+		foreach ($policy in $this.PolicyDefinitions) {
+			#If policy name 
+			If ($policy -eq $null)
+			{
+				continue
+			}
+			If ($policy.name -eq "#comment")
+			{
+				Continue
+				#"Comment policies ChildNode found, node NOT processed"
+			}
+			$this.Policies.Add([Policy]::new($this.AdmxName, $Policy.name, $Policy.class, $this.RegistryKey))
+			
+		}
+		
+	}
 }
 
 
@@ -185,23 +243,15 @@ ForEach ($key In $Admxlist.keys)
 	[xml]$AdmxData = Get-Content "$AdmxFile" @paramGetContent
 
 	
-	# Retrieve all information from the specific ADMX file
-#	$supportedOnDefChilds = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes
-#	
-#	$policiesChilds = $AdmxData.PolicyDefinitions.policies.ChildNodes
-#	
-#	$categoryChilds = $AdmxData.policyDefinitions.categories.ChildNodes
+
 	
 	ForEach ($lcid In $Admxlist.$key.LocalID)
 	{
 		$AdmxlangPath = ([system.io.path]::Combine($ADMXFolder, $lcid, $AdmxName + ".adml"))
 		[xml]$Admxlang = Get-Content -path $AdmxlangPath @paramGetContent
 		
-		# Retrieve all information from the specific ADML file
-#		$stringTableChilds = $Admxlang.policyDefinitionResources.resources.stringTable.ChildNodes
-		#		$presentationTableChilds = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
-		
-		$ListPoliciesDefinitions.Add([PolicyDefinitions]::new($AdmxName, $lcid, $AdmxData, $Admxlang))
+		# Retrieve all information from the specific ADMX and ADML file
+			$ListPoliciesDefinitions.Add([PolicyDefinitions]::new($AdmxName, $lcid, $AdmxData, $Admxlang))
 		
 
 	}

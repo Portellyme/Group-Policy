@@ -44,22 +44,32 @@ function Get-ScriptDirectory
 
 
 #region Classes
+Enum PolicyClass {
+	User = 1
+	Machine = 2
+}
+
 Class Policy{
 	
 	# Properties
 	[string]$Name
-	[string]$Class
+	[PolicyClass]$Class
 	[string]$Admx
-	[string]$Parent
-	[string]$displayName
+	[string]$ParentCategoryID
+	[string]$ParentCategory
+	[string]$DisplayNameId
+	[string]$DisplayName
+	[string]$ExplainTextId
 	[string]$ExplainText
 	[string]$supportedOnVendor
+	[string]$SupportedOnId
 	[string]$SupportedOn
 	[string]$Type
 	[string]$Label
 	[string]$RegistryHive
 	[string]$RegistryKey
 	[string]$RegistryValueName
+	[string]$RegistryDisplayName
 	[String]$RegistryValue
 	
 	
@@ -69,26 +79,59 @@ Class Policy{
 		
 	}
 	
+	Policy([string]$Admx, [string]$Name,[system.Xml.XmlElement]$Policy)
+	{
+		$this.Init($Admx, $Name, $Policy)
+
+	}
 	
-	Policy([string]$Admx, [string]$Name, [string]$Class, [string]$RegistryKey )
+	Policy([string]$Admx, [string]$Name, [system.Xml.XmlElement]$Policy, [string]$Class)
+	{
+		$this.Init($Admx, $Name, $Policy, $Class)
+	}
+
+	
+	# methods
+	# Hidden, chained helper methods that the constructors must call.
+	Hidden Init([string]$Admx, [string]$Name, [system.Xml.XmlElement]$Policy)
+	{
+		$this.Init($Admx, $Name,$Policy, $Policy.Class)
+	}
+	
+	Hidden Init([string]$Admx, [string]$Name, [system.Xml.XmlElement]$Policy, [string]$Class)
 	{
 		$this.Name = $Name
 		$this.Class = $Class
 		$this.Admx = $Admx
-		$this.RegistryKey = $RegistryKey
-		$this.RegistryHive = $this.GetHive($Class)
+		$this.DisplayNameId = $Policy.displayname.substring(9).TrimEnd(')')
+		$this.ExplainTextId = $Policy.ExplainText.substring(9).TrimEnd(')')
 		
+		$this.ParentCategoryID = $Policy.parentCategory.ref
+		$this.RegistryKey = $Policy.key
+		$this.RegistryHive = $this.GetHive($Class)
+		$this.Get_SupportedOn($Policy.supportedOn)
 	}
 	
-	# methods
 	[string] GetHive([string]$PolicyClass)
 	{
 		$RegHive = ""
 		If ($PolicyClass -eq "User") { $RegHive = "HKEY_CURRENT_USER" }
 		If ($PolicyClass -eq "Machine") { $RegHive = "HKEY_LOCAL_MACHINE" }
+		#fallback & compatibility - By default the "Both" Class should be catch to create one policy in each class 
 		If ($PolicyClass -eq "Both") { $RegHive = "HKEY_LOCAL_MACHINE" }
 		
 		return $RegHive
+	}
+	
+	[void] Get_SupportedOn([system.Xml.XmlElement]$SupportedOnRef)
+	{
+		If ($SupportedOnRef.ref.Contains(":"))
+		{
+			$this.supportedOnVendor = $SupportedOnRef.ref.split(":")[0].ToLower()
+			$this.SupportedOnId = $SupportedOnRef.ref.split(":")[1]
+		}
+		
+		
 	}
 	
 }
@@ -99,11 +142,11 @@ Class PolicyDefinitions   {
 	# Properties
 	[string]$AdmxName
 	[string]$LCID
-	[System.Xml.XmlNodeList]$SupportedOnDefChilds
-	[System.Xml.XmlNodeList]$CategoryChilds
-	[System.Xml.XmlNodeList]$PolicyDefinitions
-	[System.Xml.XmlNodeList]$StringTableChilds
-	[System.Xml.XmlNodeList]$PresentationTableChilds
+	[System.Xml.XmlNodeList]$AdmxSupportedOnDef
+	[System.Xml.XmlNodeList]$AdmxCategory
+	[System.Xml.XmlNodeList]$AdmxPolicyDefinitions
+	[System.Xml.XmlNodeList]$AdmlStringTable
+	[System.Xml.XmlNodeList]$AdmlPresentationTable
 	[System.Collections.Generic.List`1[Object]]$Policies = [System.Collections.Generic.List`1[Object]]::new()
 	
 	
@@ -112,18 +155,20 @@ Class PolicyDefinitions   {
 	{
 		$this.AdmxName = $AdmxName
 		$this.LCID = $LCID
-		$this.SupportedOnDefChilds = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes
-		$this.CategoryChilds = $AdmxData.policyDefinitions.categories.ChildNodes
-		$this.PolicyDefinitions = $AdmxData.PolicyDefinitions.policies.ChildNodes
-		$this.StringTableChilds = $Admxlang.policyDefinitionResources.resources.stringTable.ChildNodes
-		$this.PresentationTableChilds = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
+		$this.AdmxSupportedOnDef = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes
+		$this.AdmxCategory = $AdmxData.policyDefinitions.categories.ChildNodes
+		$this.AdmxPolicyDefinitions = $AdmxData.PolicyDefinitions.policies.ChildNodes
+		$this.AdmlStringTable = $Admxlang.policyDefinitionResources.resources.stringTable.ChildNodes
+		$this.AdmlPresentationTable = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
+		
+		$this.ParsePolicies()
 		
 	}
 	
 	#Methods
 	[void]ParsePolicies()
 	{
-		foreach ($policy in $this.PolicyDefinitions) {
+		foreach ($policy in $this.AdmxPolicyDefinitions) {
 			#If policy name 
 			If ($policy -eq $null)
 			{
@@ -134,11 +179,23 @@ Class PolicyDefinitions   {
 				Continue
 				#"Comment policies ChildNode found, node NOT processed"
 			}
-			$this.Policies.Add([Policy]::new($this.AdmxName, $Policy.name, $Policy.class, $this.RegistryKey))
+			#if policy is available in both class (User & Machine) we duplicate the policy
+			If ($policy.Class -eq "Both")
+			{
+				$this.Policies.Add([Policy]::new($this.AdmxName, $Policy.name, $policy, "User"))
+				$this.Policies.Add([Policy]::new($this.AdmxName, $Policy.name, $policy, "Machine"))
+			}
+			Else
+			{
+				$this.Policies.Add([Policy]::new($this.AdmxName, $Policy.name, $policy))
+			}
+	
 			
 		}
-		
 	}
+	
+	
+	
 }
 
 
@@ -224,26 +281,24 @@ If (Test-Path("$ADMXFolder\en-US\Windows.adml"))
 	# Updating the SupportedOn list with the  Windows supportedOn information from the Windows.ADMX file
 	If ($supportedOnWindowsTableFile -ne $null)
 	{
-		$VendorSupportedOn.Add('Windows',@{})
-		$supportedOnWindowsTableFile.policyDefinitionResources.resources.stringTable.ChildNodes | ForEach-Object{ $VendorSupportedOn.Windows[$_.id] = $_.'#text' }
+		#Using only lowercases for this hashtable keys
+		$VendorSupportedOn.Add('windows',@{})
+		$supportedOnWindowsTableFile.policyDefinitionResources.resources.stringTable.ChildNodes | ForEach-Object{ $VendorSupportedOn.windows[$_.id] = $_.'#text' }
 	}
 }
 
 #endregion SupportedOn
 
-
+#Create the main policies definition objects 
 ForEach ($key In $Admxlist.keys)
 {
 	$AdmxName = $Admxlist.$key.AdmxName
 	$AdmxFile = $Admxlist.$key.AdmxFullname
 	
 	#Proces each file in the directory
-	Write-Output ("**** Pre Processing ADMX " + $AdmxName)
+	Write-Output ("**** Pre Processing " + $AdmxName + " ADMX")
 	
 	[xml]$AdmxData = Get-Content "$AdmxFile" @paramGetContent
-
-	
-
 	
 	ForEach ($lcid In $Admxlist.$key.LocalID)
 	{
@@ -251,16 +306,59 @@ ForEach ($key In $Admxlist.keys)
 		[xml]$Admxlang = Get-Content -path $AdmxlangPath @paramGetContent
 		
 		# Retrieve all information from the specific ADMX and ADML file
-			$ListPoliciesDefinitions.Add([PolicyDefinitions]::new($AdmxName, $lcid, $AdmxData, $Admxlang))
-		
-
+		$ListPoliciesDefinitions.Add([PolicyDefinitions]::new($AdmxName, $lcid, $AdmxData, $Admxlang))
 	}
-	
-	
-	
+
 }
 
 
+#Fill the Policies definition with AMDL data
+#Fill display Name and explainText
+
+ForEach ($PolicyDefinition In $ListPoliciesDefinitions)
+{
+	
+	#Process each ADMX for Each language
+	Write-Output ("**** Processing " + $PolicyDefinition.AdmxName + " ADMX with " + $PolicyDefinition.LCID + " ADML")
+	
+	
+	$StringTable = $PolicyDefinition.AdmlStringTable
+	
+	# retrieve DisplayName & ExplainText information
+	ForEach ($Policy In $PolicyDefinition.Policies)
+	{
+		$Policy.DisplayName = ($StringTable | Where-Object { $_.id -eq $Policy.DisplayNameId }).InnerText.trim()
+		$Policy.ExplainText = ($StringTable | Where-Object { $_.id -eq $Policy.ExplainTextId }).InnerText.trim()
+	}
+	
+	
+	# retrieve supportedOn information         
+	ForEach ($Policy In $PolicyDefinition.Policies)
+	{
+		If ($VendorSupportedOn.ContainsKey($Policy.supportedOnVendor))
+		{
+			$Policy.SupportedOnId
+			
+		}
+	
+		
+	}
+}
+
+
+
+
 #endregion 
+#
+Break; 
+#$ListPoliciesDefinitions[0].ParsePolicies()
+$ListPoliciesDefinitions
+$ListPoliciesDefinitions[0]
+$ListPoliciesDefinitions[0]
+$ListPoliciesDefinitions.Policies |ft
+
+
+
+$ListPoliciesDefinitions.Policies.count
 
 

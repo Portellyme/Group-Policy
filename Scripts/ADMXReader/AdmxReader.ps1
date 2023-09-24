@@ -24,7 +24,6 @@
 ######################
 #region Function Declaration 
 ######################
-Import-Module AdmxTracker
 function Get-ScriptDirectory
 {
 	[OutputType([string])]
@@ -38,7 +37,6 @@ function Get-ScriptDirectory
 		Split-Path $script:MyInvocation.MyCommand.Path
 	}
 }
-
 
 #endregion
 
@@ -61,7 +59,7 @@ Class Policy{
 	[string]$DisplayName
 	[string]$ExplainTextId
 	[string]$ExplainText
-	[string]$supportedOnVendor
+	[string]$SupportedOnVendor
 	[string]$SupportedOnId
 	[string]$SupportedOn
 	[string]$Type
@@ -127,7 +125,7 @@ Class Policy{
 	{
 		If ($SupportedOnRef.ref.Contains(":"))
 		{
-			$this.supportedOnVendor = $SupportedOnRef.ref.split(":")[0].ToLower()
+			$this.SupportedOnVendor = $SupportedOnRef.ref.split(":")[0].ToLower()
 			$this.SupportedOnId = $SupportedOnRef.ref.split(":")[1]
 		}
 		
@@ -143,9 +141,10 @@ Class PolicyDefinitions   {
 	[string]$AdmxName
 	[string]$LCID
 	[System.Xml.XmlNodeList]$AdmxSupportedOnDef
-	[System.Xml.XmlNodeList]$AdmxCategory
+	#	[System.Xml.XmlNodeList]$AdmxCategory
+	[System.Collections.Hashtable]$AdmxCategory = [System.Collections.Hashtable]::new()
 	[System.Xml.XmlNodeList]$AdmxPolicyDefinitions
-	[System.Xml.XmlNodeList]$AdmlStringTable
+	[System.Collections.Hashtable]$AdmlStringTable = [System.Collections.Hashtable]::new()
 	[System.Xml.XmlNodeList]$AdmlPresentationTable
 	[System.Collections.Generic.List`1[Object]]$Policies = [System.Collections.Generic.List`1[Object]]::new()
 	
@@ -156,13 +155,13 @@ Class PolicyDefinitions   {
 		$this.AdmxName = $AdmxName
 		$this.LCID = $LCID
 		$this.AdmxSupportedOnDef = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes
-		$this.AdmxCategory = $AdmxData.policyDefinitions.categories.ChildNodes
 		$this.AdmxPolicyDefinitions = $AdmxData.PolicyDefinitions.policies.ChildNodes
-		$this.AdmlStringTable = $Admxlang.policyDefinitionResources.resources.stringTable.ChildNodes
+#		$this.AdmxCategory = $AdmxData.policyDefinitions.categories.ChildNodes
+		$this.Set_AdmxCategory($AdmxData)
+		$this.Set_StringTable($Admxlang)
 		$this.AdmlPresentationTable = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
 		
 		$this.ParsePolicies()
-		
 	}
 	
 	#Methods
@@ -189,20 +188,31 @@ Class PolicyDefinitions   {
 			{
 				$this.Policies.Add([Policy]::new($this.AdmxName, $Policy.name, $policy))
 			}
-	
-			
 		}
 	}
 	
+	[void]Set_StringTable([System.Xml.XmlDocument]$Admxlang)
+	{
+		$Admxlang.policyDefinitionResources.resources.stringTable.string | ForEach-Object { $this.AdmlStringTable[$_.id] = $_.'#text'.Trim() }
+	}
 	
-	
+	[void]Set_AdmxCategory([System.Xml.XmlDocument]$AdmxData)
+	{
+		$AdmxData.policyDefinitions.categories.ChildNodes | ForEach-Object { $this.AdmxCategory[$_.name] = $_.displayName.substring(9).TrimEnd(')') }
+		#$ListPoliciesDefinitions[0].AdmxCategory
+	}
 }
 
 
 #endregion
 
+#PSDebug
+$DebugPreference = [System.Management.Automation.ActionPreference]::Continue
+$StopWatch = [System.Diagnostics.Stopwatch]::new()
+$StopWatch.Start()
 
 #region Global Declaration 
+
 [string]$ScriptDirectory = Get-ScriptDirectory
 [string]$ScriptName = ($MyInvocation.MyCommand.Name.Split("."))[0]
 
@@ -221,9 +231,7 @@ $paramGetContent = @{
 #$ListSupportedOn = [System.Collections.Generic.List`1[Object]]::new()
 $ListPoliciesDefinitions = [System.Collections.Generic.List`1[Object]]::new()
 $VendorSupportedOn = [System.Collections.Hashtable]::new()
-
 #endregion 
-
 
 
 #region Main
@@ -272,6 +280,7 @@ ForEach ($file In $AdmxFiles)
 Write-Output ($Admxlist.Count.ToString() + " ADMX files to process in """ + $ADMXFolder + """")
 #endregion ADMXfilelist
 
+
 #region SupportedOn
 # Checking for Vendor supportedOn Files
 # Checking for the Windows supportedOn vendor definition files
@@ -311,54 +320,80 @@ ForEach ($key In $Admxlist.keys)
 
 }
 
+Write-Debug -Message "Loading in $($StopWatch.Elapsed.Milliseconds) Milliseconds"
+$StopWatch.Restart()
 
 #Fill the Policies definition with AMDL data
-#Fill display Name and explainText
-
 ForEach ($PolicyDefinition In $ListPoliciesDefinitions)
 {
-	
 	#Process each ADMX for Each language
 	Write-Output ("**** Processing " + $PolicyDefinition.AdmxName + " ADMX with " + $PolicyDefinition.LCID + " ADML")
-	
-	
-	$StringTable = $PolicyDefinition.AdmlStringTable
 	
 	# retrieve DisplayName & ExplainText information
 	ForEach ($Policy In $PolicyDefinition.Policies)
 	{
-		$Policy.DisplayName = ($StringTable | Where-Object { $_.id -eq $Policy.DisplayNameId }).InnerText.trim()
-		$Policy.ExplainText = ($StringTable | Where-Object { $_.id -eq $Policy.ExplainTextId }).InnerText.trim()
-	}
-	
-	
-	# retrieve supportedOn information         
-	ForEach ($Policy In $PolicyDefinition.Policies)
-	{
+		$Policy.DisplayName = $PolicyDefinition.AdmlStringTable.$($Policy.DisplayNameId)
+		$Policy.ExplainText = $PolicyDefinition.AdmlStringTable.$($Policy.ExplainTextId)
+
+		#retrieve supportedOn information      
+		#Use the native vendor ADML files
 		If ($VendorSupportedOn.ContainsKey($Policy.supportedOnVendor))
 		{
-			$Policy.SupportedOnId
+			$Policy.SupportedOn = $VendorSupportedOn."$($Policy.supportedOnVendor)".$($Policy.SupportedOnId)
+		}
+		#If there is no Vendor Supported On, try to use the ADML String Table
+		Else
+		{
+			$Policy.SupportedOn = $PolicyDefinition.AdmlStringTable.$($Policy.SupportedOnId)
+		}
+		
+		#retrieving parentCategory
+		If ($Policy.ParentCategoryID.Contains(":"))
+		{
+			$parentCategoryID = $Policy.ParentCategoryID.Split(":")[1]
+			$Policy.ParentCategory = $PolicyDefinition.AdmlStringTable.$parentCategoryID
+		}
+		Else
+		# no ':' in categoryParent information, find name in right Category identity
+		{
+			$parentCategoryID = $PolicyDefinition.AdmxCategory.$($Policy.ParentCategoryID)
+			If ($parentCategoryID -ne $null)
+			{
+				#parentCategory displayname found in Admx category table
+				$Policy.ParentCategory = $PolicyDefinition.AdmlStringTable.$parentCategoryID
+			}
+			Else
+			# no display name in category table. Look directly for the parentCategory in the ADML File Stringt table
+			{
+				$Policy.ParentCategory = $PolicyDefinition.AdmlStringTable.$($Policy.ParentCategoryID)
+			}
 			
 		}
-	
 		
 	}
+	
 }
 
+Write-Debug -Message "Process AMDL in $($StopWatch.Elapsed.Milliseconds) Milliseconds"
 
-
-
+$StopWatch.Stop()
 #endregion 
 #
 Break; 
 #$ListPoliciesDefinitions[0].ParsePolicies()
 $ListPoliciesDefinitions
 $ListPoliciesDefinitions[0]
-$ListPoliciesDefinitions[0]
+$ListPoliciesDefinitions[1]
 $ListPoliciesDefinitions.Policies |ft
+$ListPoliciesDefinitions[0].Policies
+
+<#
+Processing time 
+ADML Loop in script : 5115 ms
 
 
 
+#>
 $ListPoliciesDefinitions.Policies.count
 
-
+$ListPoliciesDefinitions.Policies | Select-Object -Property SupportedOnVendor, SupportedOnId, SupportedOn | ft

@@ -53,6 +53,7 @@ Class Policy{
 	[string]$Name
 	[PolicyClass]$Class
 	[string]$Admx
+	[system.Xml.XmlElement]$PolicyXml
 	[string]$ParentCategoryID
 	[string]$ParentCategory
 	[string]$DisplayNameId
@@ -67,6 +68,7 @@ Class Policy{
 	[string]$RegistryHive
 	[string]$RegistryKey
 	[string]$RegistryValueName
+	[string]$RegistryValueType
 	[string]$RegistryDisplayName
 	[String]$RegistryValue
 	
@@ -88,7 +90,6 @@ Class Policy{
 		$this.Init($Admx, $Name, $Policy, $Class)
 	}
 
-	
 	# methods
 	# Hidden, chained helper methods that the constructors must call.
 	Hidden Init([string]$Admx, [string]$Name, [system.Xml.XmlElement]$Policy)
@@ -107,7 +108,9 @@ Class Policy{
 		$this.ParentCategoryID = $Policy.parentCategory.ref
 		$this.RegistryKey = $Policy.key
 		$this.RegistryHive = $this.GetHive($Class)
+		$this.RegistryValueName = $Policy.valueName
 		$this.Get_SupportedOn($Policy.supportedOn)
+		$this.PolicyXml = $Policy
 	}
 	
 	[string] GetHive([string]$PolicyClass)
@@ -141,7 +144,6 @@ Class PolicyDefinitions   {
 	[string]$AdmxName
 	[string]$LCID
 	[System.Xml.XmlNodeList]$AdmxSupportedOnDef
-	#	[System.Xml.XmlNodeList]$AdmxCategory
 	[System.Collections.Hashtable]$AdmxCategory = [System.Collections.Hashtable]::new()
 	[System.Xml.XmlNodeList]$AdmxPolicyDefinitions
 	[System.Collections.Hashtable]$AdmlStringTable = [System.Collections.Hashtable]::new()
@@ -156,7 +158,6 @@ Class PolicyDefinitions   {
 		$this.LCID = $LCID
 		$this.AdmxSupportedOnDef = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes
 		$this.AdmxPolicyDefinitions = $AdmxData.PolicyDefinitions.policies.ChildNodes
-#		$this.AdmxCategory = $AdmxData.policyDefinitions.categories.ChildNodes
 		$this.Set_AdmxCategory($AdmxData)
 		$this.Set_StringTable($Admxlang)
 		$this.AdmlPresentationTable = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
@@ -199,7 +200,6 @@ Class PolicyDefinitions   {
 	[void]Set_AdmxCategory([System.Xml.XmlDocument]$AdmxData)
 	{
 		$AdmxData.policyDefinitions.categories.ChildNodes | ForEach-Object { $this.AdmxCategory[$_.name] = $_.displayName.substring(9).TrimEnd(')') }
-		#$ListPoliciesDefinitions[0].AdmxCategory
 	}
 }
 
@@ -376,6 +376,35 @@ ForEach ($PolicyDefinition In $ListPoliciesDefinitions)
 
 Write-Debug -Message "Process AMDL in $($StopWatch.Elapsed.Milliseconds) Milliseconds"
 
+#Fill the Policies definition with Registry data
+ForEach ($PolicyDefinition In $ListPoliciesDefinitions)
+{
+	#Process each policy
+	Write-Output ("**** Processing " + $PolicyDefinition.AdmxName + " ADMX for registry data")
+	
+	# retrieve Enable/Disable boolean registry key value
+	ForEach ($Policy In $PolicyDefinition.Policies)
+	{
+		$PolicyXml = $Policy.policyXml
+		
+		If (($Policy.policyXml.enabledValue -ne $null) -and ($Policy.policyXML.disabledValue -ne $null))
+		{
+			
+			
+			
+		}
+		
+		
+	}
+	
+	
+}
+
+
+
+
+
+
 $StopWatch.Stop()
 #endregion 
 #
@@ -390,8 +419,8 @@ $ListPoliciesDefinitions[0].Policies
 <#
 Processing time 
 ADML Loop in script : 5115 ms
-
-
+49 policies => Class both as duplicate 
+194 ms - 18 ms
 
 #>
 $ListPoliciesDefinitions.Policies.count

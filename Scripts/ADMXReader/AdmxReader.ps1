@@ -82,7 +82,6 @@ Class Policy{
 	Policy([string]$Admx, [string]$Name,[system.Xml.XmlElement]$Policy)
 	{
 		$this.Init($Admx, $Name, $Policy)
-
 	}
 	
 	Policy([string]$Admx, [string]$Name, [system.Xml.XmlElement]$Policy, [string]$Class)
@@ -131,10 +130,51 @@ Class Policy{
 			$this.SupportedOnVendor = $SupportedOnRef.ref.split(":")[0].ToLower()
 			$this.SupportedOnId = $SupportedOnRef.ref.split(":")[1]
 		}
-		
-		
 	}
 	
+}
+
+#Laziness
+Class PolicyData{
+	
+	# Properties
+	[string]$Name
+	[string]$Class
+	[string]$Admx
+	[string]$LCID
+	[string]$ParentCategory
+	[string]$DisplayName
+	[string]$ExplainText
+	[string]$SupportedOn
+	[string]$Type
+	[string]$Label
+	[string]$RegistryHive
+	[string]$RegistryKey
+	[string]$RegistryValueName
+	[string]$RegistryValueType
+	[string]$RegistryDisplayName
+	[String]$RegistryValue
+	
+	# Constructors
+	PolicyData([object]$Policy, [string]$LCID)
+	{
+		$This.Name = $Policy.Name
+		$This.Class = $Policy.Class.ToString()
+		$This.Admx = $Policy.Admx
+		$this.LCID = $LCID
+		$This.ParentCategory = $Policy.ParentCategory
+		$This.DisplayName = $Policy.DisplayName
+		$This.ExplainText = $Policy.ExplainText
+		$This.SupportedOn = $Policy.SupportedOn
+		$This.Type = $Policy.Type
+		$This.Label = $Policy.Label
+		$This.RegistryHive = $Policy.RegistryHive
+		$This.RegistryKey = $Policy.RegistryKey
+		$This.RegistryValueName = $Policy.RegistryValueName
+		$This.RegistryValueType = $Policy.RegistryValueType
+		$This.RegistryDisplayName = $Policy.RegistryDisplayName
+		$This.RegistryValue = $Policy.RegistryValue
+	}
 }
 
 
@@ -228,13 +268,13 @@ $paramGetContent = @{
 }
 
 #Create Lists used script GLOBAL
-#$ListSupportedOn = [System.Collections.Generic.List`1[Object]]::new()
 $ListPoliciesDefinitions = [System.Collections.Generic.List`1[Object]]::new()
 $VendorSupportedOn = [System.Collections.Hashtable]::new()
+$PolicyDataTable = [System.Collections.Generic.List`1[Object]]::new()
+
 #endregion 
 
 
-#region Main
 If (!(Test-Path -Path $ADMXFolder))
 {
 	Throw "Policy Directory $ADMXFolder NOT Found. Script Execution STOPPED."
@@ -280,7 +320,6 @@ ForEach ($file In $AdmxFiles)
 Write-Output ($Admxlist.Count.ToString() + " ADMX files to process in """ + $ADMXFolder + """")
 #endregion ADMXfilelist
 
-
 #region SupportedOn
 # Checking for Vendor supportedOn Files
 # Checking for the Windows supportedOn vendor definition files
@@ -298,6 +337,7 @@ If (Test-Path("$ADMXFolder\en-US\Windows.adml"))
 
 #endregion SupportedOn
 
+#region Policy Object
 #Create the main policies definition objects 
 ForEach ($key In $Admxlist.keys)
 {
@@ -322,7 +362,9 @@ ForEach ($key In $Admxlist.keys)
 
 Write-Debug -Message "Loading in $($StopWatch.Elapsed.Milliseconds) Milliseconds"
 $StopWatch.Restart()
+#endregion
 
+#region ADML Data
 #Fill the Policies definition with AMDL data
 ForEach ($PolicyDefinition In $ListPoliciesDefinitions)
 {
@@ -369,12 +411,23 @@ ForEach ($PolicyDefinition In $ListPoliciesDefinitions)
 			}
 			
 		}
-		
 	}
-	
 }
-
 Write-Debug -Message "Process AMDL in $($StopWatch.Elapsed.Milliseconds) Milliseconds"
+$StopWatch.Restart()
+#endregion
+
+
+#region Registry Data
+$RegTypeMatchEvalutor = {
+	Param ([string]$match)
+	$m = $match
+	If ($match.ToLower() -eq 'decimal') { $m = "REG_DWORD" }
+	If ($match.ToLower() -eq 'string') { $m = "REG_SZ" }
+	
+	Return $m
+}
+$RegTypeRx = [regex]::new("\w+")
 
 #Fill the Policies definition with Registry data
 ForEach ($PolicyDefinition In $ListPoliciesDefinitions)
@@ -382,31 +435,57 @@ ForEach ($PolicyDefinition In $ListPoliciesDefinitions)
 	#Process each policy
 	Write-Output ("**** Processing " + $PolicyDefinition.AdmxName + " ADMX for registry data")
 	
-	# retrieve Enable/Disable boolean registry key value
-	ForEach ($Policy In $PolicyDefinition.Policies)
+
+	ForEach ($Policy In $PolicyDefinition.Policies.GetEnumerator())
 	{
-		$PolicyXml = $Policy.policyXml
-		
-		If (($Policy.policyXml.enabledValue -ne $null) -and ($Policy.policyXML.disabledValue -ne $null))
+		# retrieve Enable/Disable boolean registry key value
+		If (($Policy.policyXml.enabledValue -ne $null))
 		{
+			$polValueType = $policy.policyXml.enabledValue.ChildNodes[0].Name
+			Switch ($polValueType)
+			{
+				"string" { $polPossibleValues = $policy.policyXml.enabledValue.string }
+				"decimal" { $polPossibleValues = $policy.policyXml.enabledValue.decimal.value.ToString() }
+				default { $polPossibleValues = "" }
+			}
+			$Policy.RegistryValueType = [regex]::Replace($polValueType, $RegTypeRx, $RegTypeMatchEvalutor)
+			$Policy.RegistryDisplayName = 'Enabled'
+			$Policy.RegistryValue = $polPossibleValues
 			
+			$PolicyDataTable.Add([policydata]::new($Policy,$PolicyDefinition.LCID))
+		}
+		
+		If (($Policy.policyXML.disabledValue -ne $null))
+		{
+			$polValueType = $policy.policyXml.disabledValue.ChildNodes[0].Name
+			Switch ($polValueType)
+			{
+				"string" { $polPossibleValues = $policy.policyXml.disabledValue.string }
+				"decimal" { $polPossibleValues = $policy.policyXml.disabledValue.decimal.value.ToString() }
+				default { $polPossibleValues = "" }
+			}
+			$Policy.RegistryValueType = [regex]::Replace($polValueType, $RegTypeRx, $RegTypeMatchEvalutor)
+			$Policy.RegistryDisplayName = 'Disabled'
+			$Policy.RegistryValue = $polPossibleValues
 			
-			
+			$PolicyDataTable.Add([policydata]::new($Policy,$PolicyDefinition.LCID))
 		}
 		
 		
 	}
-	
-	
 }
 
 
-
-
-
-
+Write-Debug -Message "Process ADMX Registry Data in $($StopWatch.Elapsed.Milliseconds) Milliseconds"
 $StopWatch.Stop()
-#endregion 
+#endregion
+
+
+
+
+
+
+
 #
 Break; 
 #$ListPoliciesDefinitions[0].ParsePolicies()

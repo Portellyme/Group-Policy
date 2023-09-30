@@ -435,45 +435,51 @@ ForEach ($PolicyDefinition In $ListPoliciesDefinitions)
 	#Process each policy
 	Write-Output ("**** Processing " + $PolicyDefinition.AdmxName + " ADMX for registry data")
 	
-
+	
 	ForEach ($Policy In $PolicyDefinition.Policies.GetEnumerator())
 	{
-		# retrieve Enable/Disable boolean registry key value
-		If (($Policy.policyXml.enabledValue -ne $null))
+		#Section Enabled / Disabled Value
+		If (($Policy.policyXml.enabledValue -ne $null) -or ($Policy.policyXML.disabledValue -ne $null))
 		{
-			$polValueType = $policy.policyXml.enabledValue.ChildNodes[0].Name
-			Switch ($polValueType)
-			{
-				"string" { $polPossibleValues = $policy.policyXml.enabledValue.string }
-				"decimal" { $polPossibleValues = $policy.policyXml.enabledValue.decimal.value.ToString() }
-				default { $polPossibleValues = "" }
+			$RegHt = @{ }
+			$Policy.policyXml | Select-Object -Property enabledValue, disabledValue | ForEach-Object {
+				$PsObj = $_;
+				$PsObj | Get-Member -MemberType properties | ForEach-Object {
+					$Name = $_.Name
+					$Valuetype = [regex]::Replace($PsObj.($Name).ChildNodes.Name, $RegTypeRx, $RegTypeMatchEvalutor)
+					$Value = Switch ($Valuetype)
+						{
+							"REG_SZ" { $PsObj.($Name).string }
+							"REG_DWORD" { $PsObj.($Name).ChildNodes.Value.ToString() }
+							default { "" }
+						}
+					$RegHt.Add($Name, @{
+							ValueType   = $Valuetype
+							DisplayName = $Name.replace("Value", "")
+							value	    = $Value
+						})
+				}
 			}
-			$Policy.RegistryValueType = [regex]::Replace($polValueType, $RegTypeRx, $RegTypeMatchEvalutor)
-			$Policy.RegistryDisplayName = 'Enabled'
-			$Policy.RegistryValue = $polPossibleValues
 			
-			$PolicyDataTable.Add([policydata]::new($Policy,$PolicyDefinition.LCID))
+			foreach ($RegKey in $RegHt.Keys) {
+				$Policy.RegistryValueType = $RegHt.$RegKey.ValueType
+				$Policy.RegistryDisplayName = $RegHt.$RegKey.DisplayName
+				$Policy.RegistryValue = $RegHt.$RegKey.value
+				$PolicyDataTable.Add([policydata]::new($Policy, $PolicyDefinition.LCID))
+			}
 		}
 		
-		If (($Policy.policyXML.disabledValue -ne $null))
-		{
-			$polValueType = $policy.policyXml.disabledValue.ChildNodes[0].Name
-			Switch ($polValueType)
-			{
-				"string" { $polPossibleValues = $policy.policyXml.disabledValue.string }
-				"decimal" { $polPossibleValues = $policy.policyXml.disabledValue.decimal.value.ToString() }
-				default { $polPossibleValues = "" }
-			}
-			$Policy.RegistryValueType = [regex]::Replace($polValueType, $RegTypeRx, $RegTypeMatchEvalutor)
-			$Policy.RegistryDisplayName = 'Disabled'
-			$Policy.RegistryValue = $polPossibleValues
-			
-			$PolicyDataTable.Add([policydata]::new($Policy,$PolicyDefinition.LCID))
-		}
+		#Section dropdown List selector 
 		
+		
+		#Section List of Strings
 		
 	}
 }
+
+
+
+
 
 
 Write-Debug -Message "Process ADMX Registry Data in $($StopWatch.Elapsed.Milliseconds) Milliseconds"
@@ -481,27 +487,18 @@ $StopWatch.Stop()
 #endregion
 
 
-
-
-
-
-
 #
 Break; 
-#$ListPoliciesDefinitions[0].ParsePolicies()
 $ListPoliciesDefinitions
 $ListPoliciesDefinitions[0]
 $ListPoliciesDefinitions[1]
 $ListPoliciesDefinitions.Policies |ft
 $ListPoliciesDefinitions[0].Policies
-
+$ListPoliciesDefinitions[1].Policies
 <#
 Processing time 
-ADML Loop in script : 5115 ms
-49 policies => Class both as duplicate 
-194 ms - 18 ms
+Loading in 202 Milliseconds
+Process AMDL in 16 Milliseconds
+Process ADMX Registry Data in 159 Milliseconds
 
 #>
-$ListPoliciesDefinitions.Policies.count
-
-$ListPoliciesDefinitions.Policies | Select-Object -Property SupportedOnVendor, SupportedOnId, SupportedOn | ft

@@ -18,9 +18,6 @@
 		https://learn.microsoft.com/en-us/globalization/locale/locale (Locale and culture awareness)
 #>
 
-
-
-
 ######################
 #region Function Declaration 
 ######################
@@ -188,6 +185,8 @@ Class PolicyDefinitions   {
 	[System.Xml.XmlNodeList]$AdmxPolicyDefinitions
 	[System.Collections.Hashtable]$AdmlStringTable = [System.Collections.Hashtable]::new()
 	[System.Xml.XmlNodeList]$AdmlPresentationTable
+	[System.Xml.XmlNamespaceManager]$AdmlNSManager
+	[System.Xml.XmlNamespaceManager]$AdmxNSManager
 	[System.Collections.Generic.List`1[Object]]$Policies = [System.Collections.Generic.List`1[Object]]::new()
 	
 	
@@ -196,11 +195,16 @@ Class PolicyDefinitions   {
 	{
 		$this.AdmxName = $AdmxName
 		$this.LCID = $LCID
-		$this.AdmxSupportedOnDef = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes
+		#Useful only if the ADMX contains a supportedOnTable - Not use in actual code 
+		$this.AdmxSupportedOnDef = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes 
 		$this.AdmxPolicyDefinitions = $AdmxData.PolicyDefinitions.policies.ChildNodes
 		$this.Set_AdmxCategory($AdmxData)
 		$this.Set_StringTable($Admxlang)
 		$this.AdmlPresentationTable = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
+	
+		$this.AdmlNSManager = $this.Get_XmlNamespaceManager($Admxlang, "ADMNS",$null)
+		$this.AdmxNSManager = $this.Get_XmlNamespaceManager($AdmxData, "ADMNS", $null)
+		
 		
 		$this.ParsePolicies()
 	}
@@ -241,6 +245,22 @@ Class PolicyDefinitions   {
 	{
 		$AdmxData.policyDefinitions.categories.ChildNodes | ForEach-Object { $this.AdmxCategory[$_.name] = $_.displayName.substring(9).TrimEnd(')') }
 	}
+	
+	[System.Xml.XmlNamespaceManager]Get_XmlNamespaceManager([xml]$XmlDocument, [string]$NamespacePrefix, [string]$NamespaceURI)
+	{
+		# If a Namespace URI is not given, use the Xml default namespace.
+		If ([string]::IsNullOrEmpty($NamespaceURI)) { $NamespaceURI = $XmlDocument.DocumentElement.NamespaceURI }
+		
+		# If a Namespace Prefix is not given, use the ns default namespace.
+		If ([string]::IsNullOrEmpty($NamespacePrefix)) { $NamespacePrefix = "ns"}
+		
+		# In order for SelectSingleNode() to actually work, we need to use the fully qualified node path along with an Xml Namespace Manager.
+		[System.Xml.XmlNamespaceManager]$xmlNsManager = [System.Xml.XmlNamespaceManager]::new($XmlDocument.NameTable)
+		$xmlNsManager.AddNamespace($NamespacePrefix, $NamespaceURI)
+		
+		return $xmlNsManager
+	}
+	
 }
 
 
@@ -418,7 +438,7 @@ $StopWatch.Restart()
 #endregion
 
 
-#region Registry Data
+
 $RegTypeMatchEvalutor = {
 	Param ([string]$match)
 	$m = $match
@@ -430,15 +450,15 @@ $RegTypeMatchEvalutor = {
 $RegTypeRx = [regex]::new("\w+")
 
 #Fill the Policies definition with Registry data
+#region Registry Enabled / Disabled Value data
 ForEach ($PolicyDefinition In $ListPoliciesDefinitions)
 {
 	#Process each policy
-	Write-Output ("**** Processing " + $PolicyDefinition.AdmxName + " ADMX for registry data")
-	
+	Write-Output ("**** Processing " + $PolicyDefinition.AdmxName + " ADMX for registry Enabled / Disabled Value data")
 	
 	ForEach ($Policy In $PolicyDefinition.Policies.GetEnumerator())
 	{
-		#Section Enabled / Disabled Value
+		#Section 
 		If (($Policy.policyXml.enabledValue -ne $null) -or ($Policy.policyXML.disabledValue -ne $null))
 		{
 			$RegHt = @{ }
@@ -448,41 +468,159 @@ ForEach ($PolicyDefinition In $ListPoliciesDefinitions)
 					$Name = $_.Name
 					$Valuetype = [regex]::Replace($PsObj.($Name).ChildNodes.Name, $RegTypeRx, $RegTypeMatchEvalutor)
 					$Value = Switch ($Valuetype)
-						{
-							"REG_SZ" { $PsObj.($Name).string }
-							"REG_DWORD" { $PsObj.($Name).ChildNodes.Value.ToString() }
-							default { "" }
-						}
+					{
+						"REG_SZ" { $PsObj.($Name).string }
+						"REG_DWORD" { $PsObj.($Name).ChildNodes.Value.ToString() }
+						default { "" }
+					}
 					$RegHt.Add($Name, @{
 							ValueType   = $Valuetype
 							DisplayName = $Name.replace("Value", "")
 							value	    = $Value
+							Type	    = "Policy"
+							Label	    = "N/A"
 						})
 				}
 			}
 			
-			foreach ($RegKey in $RegHt.Keys) {
+			ForEach ($RegKey In $RegHt.Keys)
+			{
 				$Policy.RegistryValueType = $RegHt.$RegKey.ValueType
 				$Policy.RegistryDisplayName = $RegHt.$RegKey.DisplayName
 				$Policy.RegistryValue = $RegHt.$RegKey.value
+				$Policy.Type = $RegHt.$RegKey.Type
+				$Policy.Label = $RegHt.$RegKey.Label
 				$PolicyDataTable.Add([policydata]::new($Policy, $PolicyDefinition.LCID))
 			}
 		}
+	}
+}
+Write-Debug -Message "Process ADMX Registry Enabled / Disabled Value data in $($StopWatch.Elapsed.Milliseconds) Milliseconds"
+$StopWatch.Restart()
+#endregion
+
+
+#region Registry elements enum data
+ForEach ($PolicyDefinition In $ListPoliciesDefinitions)
+{
+	#Process each policy
+	Write-Output ("**** Processing " + $PolicyDefinition.AdmxName + " ADMX for registry elements enum Value data")
+	
+	[int32]$enumcount = 0
+	$EnumElements = $PolicyDefinition.AdmxPolicyDefinitions.selectNodes(".//ADMNS:enum", $PolicyDefinition.AdmxNSManager)
+	$EnumElements | ForEach-Object{ Write-Debug -Message $_.id }
+#	ForEach ($Policy In $PolicyDefinition.Policies)
+#	{
+#		$elementsNodes = $PolicyDefinition.Policies.PolicyXml.SelectNodes(".//ADMNS:elements/ADMNS:enum", $PolicyDefinition.AdmxNSManager)
+#        $elementsNodes = $Policy.PolicyXml.SelectNodes(".//ADMNS:elements/ADMNS:enum", $PolicyDefinition.AdmxNSManager)
+#		$elementsNodes = $Policy.PolicyXml.SelectSingleNode(".//ADMNS:elements/ADMNS:enum", $PolicyDefinition.AdmxNSManager)
+		#		$Policy.PolicyXml.SelectSingleNode("ADMNS:elements", $PolicyDefinition.AdmxNSManager)
+		#		$Policy.PolicyXml.GetType()
 		
+#		$elementsNodes
+#	}
+#	$PolicyDefinition.AdmxPolicyDefinitions
+	
+	
+	
+}
+Write-Debug -Message "Process ADMX Registry Enabled / Disabled Value data in $($StopWatch.Elapsed.Milliseconds) Milliseconds"
+$StopWatch.Restart()
+#endregion Registry elements enum data
+
+
+#		$PolicyDefinition.Policies[1].PolicyXml
+		<#
+		$PolicyDefinition.Policies[1].DisplayNameId 
+		$PolicyDefinition.AdmlPresentationTable
+		
+		 [System.Xml.XmlNamespaceManager] $nsmgr = $xml.NameTable;
+		
+		
+		#>
+		
+#		$nsMgr = [System.Xml.XmlNamespaceManager]::new($Admxlang.NameTable)
+#		$nsMgr.AddNamespace("SSIS", $Admxlang.DocumentElement.NamespaceURI)
+
+#		$nsMgr.AddNamespace("PresNs", "http://www.microsoft.com/GroupPolicy/PolicyDefinitions")
 		#Section dropdown List selector 
+#		If (($Policy.policyXml.elements -ne $null))
+#		{
+			
+#			$PolicyDefinition.Policies.PolicyXml.presentation
+#			$PolicyDefinition.Policies.PolicyXml.presentation.TrimEnd(')')
+#			ForEach ($elementsNodes In $Policy.policyXml.elements.ChildNodes)
+#			{
+#				If (($elementsNodes.Name) -eq "enum")
+#				{
+					#					$PolicyDefinition.Policies
+#					$PolicyDefinition.Policies.PolicyXml.presentation
+					#$elementsPres = $PolicyDefinition.Policies.PolicyXml.presentation.Substring(15).TrimEnd(')')
+					
+#					$elementType = 
+#					
+					
+					
+#				}
+#				
+#				
+#				
+#			}
+#			
+#		}
+#		
 		
 		
 		#Section List of Strings
-		
-	}
+#		
+#	}
+#}
+
+<#
+"enum"                                                             # represents a enumeration element, process node
+ {
+     $elementType = "dropdownList"
+
+     # Retrieve label, based on element.id and policy.name
+     $oEnum = (($presentationTableChilds | Where-Object { $_.id -eq $policy.presentation.Substring(15).TrimEnd(')')}).ChildNodes | Where-Object { $_.refId -eq $element.id})
+
+    $elementType = $oEnum.Name
+    $elementLabelText = $oEnum.InnerText
+                                
+    # Retrieving the possible items from the dropdownlist
+    $dropdownListValues = "List items:"
+    $itemCount = 0
+    $element.ChildNodes | ForEach-Object {
+        $item = $_                                                 # represents a set of display names with one value or a set of registry subkey values
+        If (($item -ne $null) -and ($item.name -ne "#comment"))
+        {
+            $itemCount = $itemCount + 1
+            $itemLabelText = ($stringTableChilds | Where-Object { $_.id -eq $item.displayName.SubString(9).TrimEnd(')') }).InnerText
+            If ($item.value.string -ne $null)
+            {
+                $dropdownListValues = ($dropdownListValues + " `n     """ + $item.value.string + """ = """ + $itemLabelText + """")
+            }
+            If ($item.value.decimal -ne $null)
+            {
+                $dropdownListValues = ($dropdownListValues + " `n     """ + $item.value.decimal.value + """ = """ + $itemLabelText + """")
+            }
+        }
+    }
+    # adding the dropdownlist items to the valueName 
+    $valueName = $element.valueName
+    If ($element.required -eq "true")
+    {
+        $valueName = $valueName + " (required)"
+    }
+    Write-Debug "$itemCount items processed"
 }
 
+#>
 
 
 
 
 
-Write-Debug -Message "Process ADMX Registry Data in $($StopWatch.Elapsed.Milliseconds) Milliseconds"
 $StopWatch.Stop()
 #endregion
 

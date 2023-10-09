@@ -29,9 +29,11 @@ Class PolicyDefinition   {
 	[System.Xml.XmlNamespaceManager]$AdmxNamespace
 	[System.Xml.XmlNamespaceManager]$AdmlNamespace
 	[System.Collections.Hashtable]$AdmxCategories = [System.Collections.Hashtable]::new()
-	[System.Xml.XmlNodeList]$Policies
-#	[System.Collections.Hashtable]$AdmlStringTable = [System.Collections.Hashtable]::new()
-#	[System.Xml.XmlNodeList]$AdmlPresentationTable
+	#	[System.Xml.XmlNodeList]$Policies
+	[System.Collections.Hashtable]$Policies = [System.Collections.Hashtable]::new()
+	[System.Collections.Hashtable]$AdmlStringTable = [System.Collections.Hashtable]::new()
+	#	[System.Xml.XmlNodeList]$AdmlPresentationTable
+	[System.Collections.Hashtable]$AdmlPresentationTable = [System.Collections.Hashtable]::new()
 
 #	[System.Collections.Generic.List`1[Object]]$Policies = [System.Collections.Generic.List`1[Object]]::new()
 	
@@ -42,12 +44,14 @@ Class PolicyDefinition   {
 		$this.AdmxName = $AdmxName
 		$this.LCID = $LCID
 		$this.AdmxNamespace = $this.Get_XmlNamespaceManager($AdmxData, "admns", $null)
-		$this.AdmlNamespace = $this.Get_XmlNamespaceManager($AdmlData, "admns", $null)		
+		$this.AdmlNamespace = $this.Get_XmlNamespaceManager($AdmlData, "admns", $null)
 		$this.Set_AdmxCategory($AdmxData)
-		$this.Policies = $AdmxData.PolicyDefinitions.policies.ChildNodes
-
-#		$this.Set_StringTable($Admxlang)
-#		$this.AdmlPresentationTable = $Admxlang.policyDefinitionResources.resources.presentationTable.ChildNodes
+		$this.Set_Policies($AdmxData)
+		$this.Set_StringTable($AdmlData)
+		$this.Set_PresentationTable($AdmlData)
+		
+#		$AdmlData.policyDefinitionResources.resources.presentationTable.ChildNodes | ForEach-Object { $presht.Add($_.id, $_) }
+#		$this.AdmlPresentationTable = $AdmlData.policyDefinitionResources.resources.presentationTable.ChildNodes
 #		
 
 #		
@@ -71,10 +75,24 @@ Class PolicyDefinition   {
 		Return $xmlNsManager
 	}
 	
+	[void]Set_Policies([System.Xml.XmlDocument]$AdmxData)
+	{
+		$AdmxData.policyDefinitions.policies.ChildNodes | ForEach-Object { $this.Policies.Add($_.Name, $_) }
+	}
 	
 	[void]Set_AdmxCategory([System.Xml.XmlDocument]$AdmxData)
 	{
 		$AdmxData.policyDefinitions.categories.ChildNodes | ForEach-Object { $this.AdmxCategories[$_.name] = $_.displayName.substring(9).TrimEnd(')') }
+	}
+	
+	[void]Set_StringTable([System.Xml.XmlDocument]$AdmlData)
+	{
+		$AdmlData.policyDefinitionResources.resources.stringTable.string | ForEach-Object { $this.AdmlStringTable[$_.id] = $_.'#text'.Trim() }
+	}
+	
+	[void]Set_PresentationTable([System.Xml.XmlDocument]$AdmlData)
+	{
+	   $AdmlData.policyDefinitionResources.resources.presentationTable.ChildNodes | ForEach-Object { $this.AdmlPresentationTable.Add($_.id, $_) }
 	}
 	
 	#	[void]ParsePolicies()
@@ -104,10 +122,7 @@ Class PolicyDefinition   {
 #		}
 #	}
 	
-#	[void]Set_StringTable([System.Xml.XmlDocument]$Admxlang)
-#	{
-#		$Admxlang.policyDefinitionResources.resources.stringTable.string | ForEach-Object { $this.AdmlStringTable[$_.id] = $_.'#text'.Trim() }
-#	}
+
 #	
 
 	
@@ -233,7 +248,7 @@ ForEach ($key In $AdmxFileslist.keys)
 		[xml]$AdmlData = Get-Content -path $AdmlFilePath @paramGetContent
 		
 		#Push all information from the specific ADMX and ADML file in a list
-		$PolicyDefinitionList.Add([PolicyDefinition]::new($AdmxName, $lcid, $AdmxData, $Admxlang))
+		$PolicyDefinitionList.Add([PolicyDefinition]::new($AdmxName, $lcid, $AdmxData, $AdmlData))
 		
 <#		
 		#Step to add ADMX/ADML Supported On 
@@ -255,5 +270,15 @@ $PolicyDefinitionList
 
 
 #endregion 
+Break
 
+$policyHt = @{ }
+
+$AdmxData.policyDefinitions.policies.ChildNodes | ForEach-Object { $policyHt.Add($_.Name, $_)}
+
+#$this.AdmlPresentationTable = $AdmlData.policyDefinitionResources.resources.presentationTable.ChildNodes
+
+$presht = @{ }
+
+$AdmlData.policyDefinitionResources.ressources.presentationTable.ChildNodes | ForEach-Object { $_ }
 

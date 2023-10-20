@@ -28,14 +28,12 @@ Class PolicyDefinition   {
 	[string]$LCID
 	[System.Xml.XmlNamespaceManager]$AdmxNamespace
 	[System.Xml.XmlNamespaceManager]$AdmlNamespace
-	[System.Collections.Hashtable]$AdmxCategories = [System.Collections.Hashtable]::new()
-	#	[System.Xml.XmlNodeList]$Policies
-	[System.Collections.Hashtable]$Policies = [System.Collections.Hashtable]::new()
+	[System.Collections.Hashtable]$AdmxCategoriesTable = [System.Collections.Hashtable]::new()
+	[System.Collections.Hashtable]$AdmxPoliciesTable = [System.Collections.Hashtable]::new()
 	[System.Collections.Hashtable]$AdmlStringTable = [System.Collections.Hashtable]::new()
-	#	[System.Xml.XmlNodeList]$AdmlPresentationTable
 	[System.Collections.Hashtable]$AdmlPresentationTable = [System.Collections.Hashtable]::new()
 
-#	[System.Collections.Generic.List`1[Object]]$Policies = [System.Collections.Generic.List`1[Object]]::new()
+	[System.Collections.Generic.List`1[Object]]$Policies = [System.Collections.Generic.List`1[Object]]::new()
 	
 	
 	# Constructors
@@ -45,11 +43,11 @@ Class PolicyDefinition   {
 		$this.LCID = $LCID
 		$this.AdmxNamespace = $this.Get_XmlNamespaceManager($AdmxData, "admns", $null)
 		$this.AdmlNamespace = $this.Get_XmlNamespaceManager($AdmlData, "admns", $null)
-		$this.Set_AdmxCategory($AdmxData)
-		$this.Set_Policies($AdmxData)
 		$this.Set_StringTable($AdmlData)
 		$this.Set_PresentationTable($AdmlData)
 		
+		$this.Set_AdmxCategory($AdmxData)
+		$this.Set_Policies($AdmxData)
 #		$AdmlData.policyDefinitionResources.resources.presentationTable.ChildNodes | ForEach-Object { $presht.Add($_.id, $_) }
 #		$this.AdmlPresentationTable = $AdmlData.policyDefinitionResources.resources.presentationTable.ChildNodes
 #		
@@ -77,12 +75,22 @@ Class PolicyDefinition   {
 	
 	[void]Set_Policies([System.Xml.XmlDocument]$AdmxData)
 	{
-		$AdmxData.policyDefinitions.policies.ChildNodes | ForEach-Object { $this.Policies.Add($_.Name, $_) }
+		$AdmxData.policyDefinitions.policies.ChildNodes | ForEach-Object { $this.AdmxPoliciesTable.Add($_.Name, $_) }
 	}
 	
 	[void]Set_AdmxCategory([System.Xml.XmlDocument]$AdmxData)
 	{
-		$AdmxData.policyDefinitions.categories.ChildNodes | ForEach-Object { $this.AdmxCategories[$_.name] = $_.displayName.substring(9).TrimEnd(')') }
+		$AdmxData.policyDefinitions.categories.ChildNodes |
+		ForEach-Object {
+			$displayNameID = $_.displayName.substring(9).TrimEnd(')');
+			$lht = @{
+				name		  = $_.name;
+				displayNameID = $displayNameID;
+				displayName   = $this.AdmlStringTable.$displayNameID;
+			}
+			#			$this.AdmxCategories[$_.name] = $_.displayName.substring(9).TrimEnd(')') }
+			$this.AdmxCategoriesTable[$_.name] = $lht
+		}
 	}
 	
 	[void]Set_StringTable([System.Xml.XmlDocument]$AdmlData)
@@ -121,15 +129,48 @@ Class PolicyDefinition   {
 #			}
 #		}
 #	}
-	
-
-#	
-
-	
-
-	
 }
 
+Class Policy{
+	
+	# Properties
+	[string]$Admx
+	[string]$Name
+	[string]$Class #User, Computer
+	[string]$DisplayName
+	[string]$ExplainText
+	[string]$ParentCategory
+	[string]$SupportedOn
+	
+	[string]$RegHive #HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE
+	[string]$RegPath # SOFTWARE\Policies\Microsoft\OneDrive
+	[string]$RegValueName #DisablePersonalSync
+	[string]$RegValueType #REG_DWORD, REG_SZ
+	[string]$Label
+	[string]$RegDisplayName # Enabled Value, Disabled Value, Min Value, Default Value, Max Value
+	[String]$RegValue #1, 0, list, Int, 
+	
+	
+	# Constructors
+	Policy()
+	{	
+	}
+	
+	Policy([System.Collections.Hashtable]$Policy)
+	{
+		$this.Admx = $Policy.Admx
+		$this.Name = $Policy.Name
+		$this.Class = $policy.class
+		$this.DisplayName = $Policy.DisplayName
+		$this.ExplainText = $Policy.ExplainText
+		$this.ParentCategory = $Policy.ParentCategory
+		$this.SupportedOn = $Policy.SupportedOn
+		$this.RegHive = $Policy.RegHive
+		$this.RegPath = $Policy.RegPath
+		$this.RegValueName = $Policy.RegValueName
+	}
+	
+}
 #endregion
 
 #region PSDebug
@@ -212,7 +253,7 @@ $StopWatch.Restart()
 
 
 #region SupportedOn
-# Checking for Vendor supportedOn Files
+# Checking for Vendor supportedOn Files => To implement when the case will present
 # Checking for the Windows supportedOn vendor definition files
 If (Test-Path("$ADMXFolder\en-US\Windows.adml"))
 {
@@ -230,7 +271,7 @@ $StopWatch.Restart()
 #endregion SupportedOn
 
 
-#region Policy Object
+#region PolicyDefinitionList
 #Create the main policies definition objects 
 ForEach ($key In $AdmxFileslist.keys)
 {
@@ -249,36 +290,149 @@ ForEach ($key In $AdmxFileslist.keys)
 		
 		#Push all information from the specific ADMX and ADML file in a list
 		$PolicyDefinitionList.Add([PolicyDefinition]::new($AdmxName, $lcid, $AdmxData, $AdmlData))
-		
-<#		
-		#Step to add ADMX/ADML Supported On 
-		#$this.AdmxSupportedOnDef = $AdmxData.policyDefinitions.supportedOn.definitions.ChildNodes
-#>		
 	}
-	
 }
 
-Write-Debug -Message "Loading in $($StopWatch.Elapsed.Milliseconds) Milliseconds"
+Write-Debug -Message "Loading policies definition in $([math]::round($StopWatch.Elapsed.TotalSeconds, 3)) seconds"
 $StopWatch.Restart()
-#endregion
+#endregion PolicyDefinitionList
 
 
-#region Main
-$PolicyDefinitionList
+#region PoliciesBaseline
+#Create Policies list baseline with localization 
+ForEach ($PolicyDefinition In $PolicyDefinitionList)
+{
+#	$PolicyDefinition.Policies.gettype()
+	
+	ForEach ($key In $PolicyDefinition.AdmxPoliciesTable.keys)
+	{
+		$Policy = $PolicyDefinition.AdmxPoliciesTable.$key
+		
+		#region parentCategory
+		#retrieving parentCategory
+		If ($Policy.ParentCategory.ref.Contains(":"))
+		{
+			$parentCategoryID = $Policy.ParentCategory.ref.Split(":")[1]
+			$ParentCategory = $PolicyDefinition.AdmlStringTable.$parentCategoryID
+		}
+		Else
+		# no ':' in categoryParent information, find name in the generated category table
+		{
+			$parentCategoryTable = $PolicyDefinition.AdmxCategoriesTable.$($Policy.parentCategory.ref)
+			If ($parentCategoryTable.displayName -ne $null)
+			{
+				#parentCategory displayname found in Adml category table
+				$ParentCategory = $parentCategoryTable.displayName
+			}
+			Else
+			# no display name in category table use the parentCategory reference from the ADMX
+			{
+				$ParentCategory = $Policy.parentCategory.ref
+			}
+		}
+		#endregion parentCategory
+		
+		#region supportedOn
+		#retrieve supportedOn information       
+		If ($Policy.supportedOn.ref.Contains(":"))
+		{
+			$SupportedOnVendor = $Policy.supportedOn.ref.split(":")[0].ToLower()
+			$SupportedOnId = $Policy.supportedOn.ref.split(":")[1]
+			
+			If ($VendorSupportedOn.ContainsKey($SupportedOnVendor))
+			{
+				$supportedOn = $VendorSupportedOn.$SupportedOnVendor.$SupportedOnId
+			}
+			#If there is no Vendor Supported On
+			Else
+			{
+				$supportedOn = "Unknown"
+			}
+		}
+		Else
+		{
+			$supportedOn = "Unknown"
+		}
+		#endregion supportedOn
+		
+		#region Class
+		If ($policy.class -eq "User")
+		{
+			$RegHive = "HKEY_CURRENT_USER"
+		}
+		ElseIf ($policy.class -eq "Machine")
+		{
+			$RegHive = "HKEY_LOCAL_MACHINE"
+		}
+		Else
+		{
+			$RegHive = "HKEY_LOCAL_MACHINE or HKEY_CURRENT_USER"
+		}
+		#endregion Class
+		
+		$PolicyTable = @{
+			Admx		   = $PolicyDefinition.AdmxName;
+			Name		   = $Policy.Name;
+			Class		   = $policy.class;
+			DisplayName    = $PolicyDefinition.AdmlStringTable.$($Policy.displayName.substring(9).TrimEnd(')'));
+			ExplainText    = $PolicyDefinition.AdmlStringTable.$($Policy.explainText.substring(9).TrimEnd(')'));
+			ParentCategory = $ParentCategory;
+			SupportedOn    = $supportedOn;
+			RegHive	       = $RegHive;
+			RegPath	       = $Policy.key;
+			RegValueName   = $Policy.valueName; #Useful only on Enabled / Disbale value but represent most of the policies configuration
+		}
+		
+		$PolicyDefinition.Policies.Add([policy]::new($PolicyTable))
+	}
 
+}
+Write-Debug -Message "Parsing policy baseline in $([math]::round($StopWatch.Elapsed.TotalSeconds, 3)) seconds"
+$StopWatch.Restart()
+#endregion PoliciesBaseline
 
-
-
-#endregion 
 Break
 
-$policyHt = @{ }
+<#
+		$Policy.DisplayName = $PolicyDefinition.AdmlStringTable.$($Policy.DisplayNameId)
+		$Policy.ExplainText = $PolicyDefinition.AdmlStringTable.$($Policy.ExplainTextId)
 
-$AdmxData.policyDefinitions.policies.ChildNodes | ForEach-Object { $policyHt.Add($_.Name, $_)}
+		#retrieve supportedOn information      
+		#Use the native vendor ADML files
+		If ($VendorSupportedOn.ContainsKey($Policy.supportedOnVendor))
+		{
+			$Policy.SupportedOn = $VendorSupportedOn."$($Policy.supportedOnVendor)".$($Policy.SupportedOnId)
+		}
+		#If there is no Vendor Supported On, try to use the ADML String Table
+		Else
+		{
+			$Policy.SupportedOn = $PolicyDefinition.AdmlStringTable.$($Policy.SupportedOnId)
+		}
+		
+		#retrieving parentCategory
+		If ($Policy.ParentCategoryID.Contains(":"))
+		{
+			$parentCategoryID = $Policy.ParentCategoryID.Split(":")[1]
+			$Policy.ParentCategory = $PolicyDefinition.AdmlStringTable.$parentCategoryID
+		}
+		Else
+		# no ':' in categoryParent information, find name in right Category identity
+		{
+			$parentCategoryID = $PolicyDefinition.AdmxCategory.$($Policy.ParentCategoryID)
+			If ($parentCategoryID -ne $null)
+			{
+				#parentCategory displayname found in Admx category table
+				$Policy.ParentCategory = $PolicyDefinition.AdmlStringTable.$parentCategoryID
+			}
+			Else
+			# no display name in category table. Look directly for the parentCategory in the ADML File Stringt table
+			{
+				$Policy.ParentCategory = $PolicyDefinition.AdmlStringTable.$($Policy.ParentCategoryID)
+			}
+			
+		}
+	}
 
-#$this.AdmlPresentationTable = $AdmlData.policyDefinitionResources.resources.presentationTable.ChildNodes
 
-$presht = @{ }
 
-$AdmlData.policyDefinitionResources.ressources.presentationTable.ChildNodes | ForEach-Object { $_ }
-
+#>

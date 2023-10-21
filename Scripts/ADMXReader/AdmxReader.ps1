@@ -41,8 +41,8 @@ Class PolicyDefinition   {
 	{
 		$this.AdmxName = $AdmxName
 		$this.LCID = $LCID
-		$this.AdmxNamespace = $this.Get_XmlNamespaceManager($AdmxData, "admns", $null)
-		$this.AdmlNamespace = $this.Get_XmlNamespaceManager($AdmlData, "admns", $null)
+		$this.AdmxNamespace = $this.Set_XmlNamespaceManager($AdmxData, "admns", $null)
+		$this.AdmlNamespace = $this.Set_XmlNamespaceManager($AdmlData, "admns", $null)
 		$this.Set_StringTable($AdmlData)
 		$this.Set_PresentationTable($AdmlData)
 		
@@ -50,15 +50,10 @@ Class PolicyDefinition   {
 		$this.Set_Policies($AdmxData)
 #		$AdmlData.policyDefinitionResources.resources.presentationTable.ChildNodes | ForEach-Object { $presht.Add($_.id, $_) }
 #		$this.AdmlPresentationTable = $AdmlData.policyDefinitionResources.resources.presentationTable.ChildNodes
-#		
-
-#		
-#		
-#		$this.ParsePolicies()
 	}
 	
 	#Methods
-	[System.Xml.XmlNamespaceManager]Get_XmlNamespaceManager([xml]$XmlDocument, [string]$NamespacePrefix, [string]$NamespaceURI)
+	[System.Xml.XmlNamespaceManager]Set_XmlNamespaceManager([xml]$XmlDocument, [string]$NamespacePrefix, [string]$NamespaceURI)
 	{
 		# If a Namespace URI is not given, use the Xml default namespace.
 		If ([string]::IsNullOrEmpty($NamespaceURI)) { $NamespaceURI = $XmlDocument.DocumentElement.NamespaceURI }
@@ -102,42 +97,18 @@ Class PolicyDefinition   {
 	{
 	   $AdmlData.policyDefinitionResources.resources.presentationTable.ChildNodes | ForEach-Object { $this.AdmlPresentationTable.Add($_.id, $_) }
 	}
-	
-	#	[void]ParsePolicies()
-#	{
-#		ForEach ($policy In $this.AdmxPolicyDefinitions)
-#		{
-#			#If policy name 
-#			If ($policy -eq $null)
-#			{
-#				Continue
-#			}
-#			If ($policy.name -eq "#comment")
-#			{
-#				Continue
-#				#"Comment policies ChildNode found, node NOT processed"
-#			}
-#			#if policy is available in both class (User & Machine) we duplicate the policy
-#			If ($policy.Class -eq "Both")
-#			{
-#				$this.Policies.Add([Policy]::new($this.AdmxName, $Policy.name, $policy, "User"))
-#				$this.Policies.Add([Policy]::new($this.AdmxName, $Policy.name, $policy, "Machine"))
-#			}
-#			Else
-#			{
-#				$this.Policies.Add([Policy]::new($this.AdmxName, $Policy.name, $policy))
-#			}
-#		}
-#	}
+
 }
 
 Class Policy{
 	
 	# Properties
 	[string]$Admx
+	[string]$LCID
 	[string]$Name
 	[string]$Class #User, Computer
 	[string]$DisplayName
+	[string]$Presentation
 	[string]$ExplainText
 	[string]$ParentCategory
 	[string]$SupportedOn
@@ -159,16 +130,25 @@ Class Policy{
 	Policy([System.Collections.Hashtable]$Policy)
 	{
 		$this.Admx = $Policy.Admx
+		$this.LCID = $Policy.LCID
 		$this.Name = $Policy.Name
 		$this.Class = $policy.class
 		$this.DisplayName = $Policy.DisplayName
 		$this.ExplainText = $Policy.ExplainText
+		$this.Presentation = $Policy.Presentation
 		$this.ParentCategory = $Policy.ParentCategory
 		$this.SupportedOn = $Policy.SupportedOn
 		$this.RegHive = $Policy.RegHive
 		$this.RegPath = $Policy.RegPath
 		$this.RegValueName = $Policy.RegValueName
 	}
+	
+	#Methods	
+	[Object]Clone()
+	{
+		Return $this.MemberwiseClone()
+	}
+	
 	
 }
 #endregion
@@ -179,7 +159,6 @@ $DebugPreference = [System.Management.Automation.ActionPreference]::Continue
 $StopWatch = [System.Diagnostics.Stopwatch]::new()
 $StopWatch.Start()
 #endregion PSDebug
-
 
 
 #region Global Declaration 
@@ -201,7 +180,7 @@ $VendorSupportedOn = [System.Collections.Hashtable]::new()
 $PolicyDefinitionList = [System.Collections.Generic.List`1[Object]]::new()
 
 
-
+# Final list of policies 
 $PolicyDataTable = [System.Collections.Generic.List`1[Object]]::new()
 
 
@@ -279,7 +258,7 @@ ForEach ($key In $AdmxFileslist.keys)
 	$AdmxFile = $AdmxFileslist.$key.FileName
 	
 	#Proces each file in the directory
-	Write-Output ("**** Pre Processing " + $AdmxName + " ADMX")
+	Write-Output ("**** Policies definition Processing " + $AdmxName + " ADMX")
 	[xml]$AdmxData = Get-Content "$AdmxFile" @paramGetContent
 	
 	ForEach ($lcid In $AdmxFileslist.$key.LocalID.keys)
@@ -304,6 +283,7 @@ ForEach ($PolicyDefinition In $PolicyDefinitionList)
 {
 #	$PolicyDefinition.Policies.gettype()
 	
+	Write-Output ("**** Policies localization baseline " + $PolicyDefinition.AdmxName + " " + $PolicyDefinition.LCID)
 	ForEach ($key In $PolicyDefinition.AdmxPoliciesTable.keys)
 	{
 		$Policy = $PolicyDefinition.AdmxPoliciesTable.$key
@@ -370,12 +350,25 @@ ForEach ($PolicyDefinition In $PolicyDefinitionList)
 		}
 		#endregion Class
 		
+		#region PolicyPresentation
+		If ($Policy.presentation)
+		{
+			$Presentation = $Policy.presentation.Substring(15).TrimEnd(')')
+		}
+		Else
+		{
+			$Presentation = ""
+		}
+		#endregion PolicyPresentation
+		
 		$PolicyTable = @{
 			Admx		   = $PolicyDefinition.AdmxName;
+			LCID		   = $PolicyDefinition.LCID;
 			Name		   = $Policy.Name;
 			Class		   = $policy.class;
 			DisplayName    = $PolicyDefinition.AdmlStringTable.$($Policy.displayName.substring(9).TrimEnd(')'));
 			ExplainText    = $PolicyDefinition.AdmlStringTable.$($Policy.explainText.substring(9).TrimEnd(')'));
+			Presentation   = $Presentation;
 			ParentCategory = $ParentCategory;
 			SupportedOn    = $supportedOn;
 			RegHive	       = $RegHive;
@@ -391,7 +384,188 @@ Write-Debug -Message "Parsing policy baseline in $([math]::round($StopWatch.Elap
 $StopWatch.Restart()
 #endregion PoliciesBaseline
 
+
+#region PoliciesCompletion
+$RegTypeMatchEvalutor = {
+	Param ([string]$match)
+	$m = $match
+	If ($match.ToLower() -eq 'decimal') { $m = "REG_DWORD" }
+	If ($match.ToLower() -eq 'string') { $m = "REG_SZ" }
+	
+	Return $m
+}
+$RegTypeRx = [regex]::new("\w+")
+
+$basicNodeNames = @{
+	enabled = @{
+		node = 'enabledValue';
+		Dn   = 'Enabled Value'
+	};
+	disabled = @{
+		node = 'disabledValue';
+		Dn   = 'Disabled Value'
+	};
+}
+
+#complete the policies with the technical values and add them to the "$PolicyDataTable"
+ForEach ($PolicyDefinition In $PolicyDefinitionList)
+{
+	foreach ($Policy in $PolicyDefinition.Policies) {
+		$PolName = $Policy.Name
+		
+		#region BasicPolicy
+		#Basic Policy Enabled / disabled value
+		ForEach ($key In $basicNodeNames.keys)
+		{
+			$nodeName = $basicNodeNames.$key.node
+			$Node = $PolicyDefinition.AdmxPoliciesTable.$PolName.SelectSingleNode(".//admns:$($nodeName)", $PolicyDefinition.AdmxNamespace)
+			If ($Node -ne $null)
+			{
+				$Valuetype = [regex]::Replace($Node.ChildNodes[0].Name, $RegTypeRx, $RegTypeMatchEvalutor)
+				Switch ($Node.ChildNodes[0].Name)
+				{
+					string {
+						$Value = $Node.string
+					}
+					decimal {
+						$Value = $Node.decimal.value.ToString()
+					}
+					default {
+						$Value = ""
+					}
+				}
+
+				#Not optimized but useful to debug
+				$Policy.RegValueType = $Valuetype
+				$Policy.RegDisplayName = $basicNodeNames.$key.Dn
+				$Policy.RegValue = $Value
+				$PolicyDataTable.Add($Policy.clone())
+			}
+		}
+		#endregion BasicPolicy
+		
+		#region ElementDropdownList
+		$element = $PolicyDefinition.AdmxPoliciesTable.$PolName.SelectSingleNode(".//admns:elements", $PolicyDefinition.AdmxNamespace)
+		If ($element -ne $null)
+		{
+			
+			ForEach ($Child In $element.Childnodes)
+			{
+				If ($Child.Name -eq "enum")
+				{
+					$enum = $Child
+					$Pres = $PolicyDefinition.AdmlPresentationTable.$($Policy.Presentation).SelectSingleNode("//admns:*[@refId='$($enum.ID)']", $PolicyDefinition.AdmlNamespace)
+#					$PolicyDefinition.AdmlPresentationTable.KFMOptInNoWizard_Pres.SelectSingleNode("//admns:*[@refId='KFMOptInNoWizard_Dropdown']", $PolicyDefinition.AdmlNamespace)
+					#"SSIS:Property[@SSIS:Name='Value'
+					
+					#$Pres = $PolicyDefinition.AdmlPresentationTable.$PolName.Presentation.ChildNodes
+#					$Pres = $PolicyDefinition.AdmlPresentationTable.$($Policy.Presentation)
+					
+					$elementType = $Pres.Name
+					$elementLabel = $Pres.InnerText #Label
+					#$PolicyDefinition.Policies.where({$_.Name -eq "GPOSetUpdateRing"}).Presentation
+					#<dropdownList refId="KFMOptInNoWizard_Dropdown" noSort="true" defaultItem="0">Afficher une notification aux utilisateurs après que des dossiers ont été redirigés :</dropdownList>
+#					$elementType
+#					$elementLabel
+					$Policy.Label = $Pres.InnerText
+					$Policy.RegValueName = $enum.valueName
+					
+					
+					foreach ($item in $enum.childnodes ) {
+						$Policy.DisplayName = $PolicyDefinition.AdmlStringTable.$($item.displayName.substring(9).TrimEnd(')'));
+						
+					}
+					
+					<#
+RegValueName   : DONE
+RegValueType   : 
+Label          : DONE
+RegDisplayName : DONE
+RegValue       : 
+					#>
+					
+					
+#					$Policy.RegValueType = $Valuetype
+#					$Policy.RegDisplayName = $basicNodeNames.$key.Dn
+#					$Policy.RegValue = $Value
+#					$PolicyDataTable.Add($Policy.clone())
+					
+				}
+				
+			}
+		}
+		
+		
+		#endregion ElementDropdownList
+		
+#		#$PolicyDefinition.AdmxPoliciesTable.GPOSetUpdateRing.elements.enum
+#		$PolicyDefinition.AdmxPoliciesTable.GPOSetUpdateRing.SelectSingleNode(".//admns:elements", $PolicyDefinition.AdmxNamespace)
+#		$PolicyDefinition.AdmxPoliciesTable.KFMOptInNoWizard.SelectSingleNode(".//admns:elements", $PolicyDefinition.AdmxNamespace)
+		
+	}
+	
+}
+Write-Debug -Message "Completin policies technical data in $([math]::round($StopWatch.Elapsed.TotalSeconds, 3)) seconds"
+$StopWatch.Restart()
+#endregion PoliciesCompletion
+
+
 Break
+<#
+"enum"                                                             # represents a enumeration element, process node
+                                {
+                                    $elementType = "dropdownList"
+
+                                    # Retrieve label, based on element.id and policy.name
+                                    $oEnum = (($presentationTableChilds | Where-Object { $_.id -eq $policy.presentation.Substring(15).TrimEnd(')')}).ChildNodes | Where-Object { $_.refId -eq $element.id})
+
+                                    $elementType = $oEnum.Name
+                                    $elementLabelText = $oEnum.InnerText
+                                                                
+                                    # Retrieving the possible items from the dropdownlist
+                                    $dropdownListValues = "List items:"
+                                    $itemCount = 0
+                                    $element.ChildNodes | ForEach-Object {
+                                        $item = $_                                                 # represents a set of display names with one value or a set of registry subkey values
+                                        If (($item -ne $null) -and ($item.name -ne "#comment"))
+                                        {
+                                            $itemCount = $itemCount + 1
+                                            $itemLabelText = ($stringTableChilds | Where-Object { $_.id -eq $item.displayName.SubString(9).TrimEnd(')') }).InnerText
+                                            If ($item.value.string -ne $null)
+                                            {
+                                                $dropdownListValues = ($dropdownListValues + " `n     """ + $item.value.string + """ = """ + $itemLabelText + """")
+                                            }
+                                            If ($item.value.decimal -ne $null)
+                                            {
+                                                $dropdownListValues = ($dropdownListValues + " `n     """ + $item.value.decimal.value + """ = """ + $itemLabelText + """")
+                                            }
+                                        }
+                                    }
+                                    # adding the dropdownlist items to the valueName 
+                                    $valueName = $element.valueName
+                                    If ($element.required -eq "true")
+                                    {
+                                        $valueName = $valueName + " (required)"
+                                    }
+                                    Write-Debug "$itemCount items processed"
+                                }
+
+#>
+
+
+
+
+$statusTable =@('enabledValue', 'prout', 'disabledValue')
+
+foreach ($state in $statusTable) {
+	$statedata = $PolicyDefinition.AdmxPoliciesTable.DisablePersonalSync.SelectSingleNode(".//admns:$($state)", $PolicyDefinition.AdmxNamespace)
+	$statedata -eq $null
+}
+
+$Node = $PolicyDefinition.AdmxPoliciesTable.DisablePersonalSync.SelectSingleNode(".//admns:enabledValue", $PolicyDefinition.AdmxNamespace)
+$Node -eq $null
+
+
 
 <#
 		$Policy.DisplayName = $PolicyDefinition.AdmlStringTable.$($Policy.DisplayNameId)
